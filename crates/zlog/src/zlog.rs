@@ -5,7 +5,9 @@ mod env_config;
 pub mod filter;
 pub mod sink;
 
-pub use sink::{flush, init_output_file, init_output_stderr, init_output_stdout};
+pub use sink::{
+    enable_line_numbers, flush, init_output_file, init_output_stderr, init_output_stdout,
+};
 
 pub const SCOPE_DEPTH_MAX: usize = 4;
 
@@ -89,6 +91,7 @@ impl log::Log for Zlog {
             message: record.args(),
             // PERF(batching): store non-static paths in a cache + leak them and pass static str here
             module_path: record.module_path().or(record.file()),
+            line: record.line(),
         });
     }
 
@@ -109,6 +112,7 @@ macro_rules! log {
                 level,
                 message: &format_args!($($arg)+),
                 module_path: Some(module_path!()),
+                line: Some(line!()),
             });
         }
     }
@@ -299,6 +303,7 @@ impl log::Log for Logger {
             level,
             message: record.args(),
             module_path: record.module_path(),
+            line: record.line(),
         });
     }
 

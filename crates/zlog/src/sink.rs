@@ -33,12 +33,15 @@ static ENABLED_SINKS_STDERR: AtomicBool = AtomicBool::new(false);
 static SINK_FILE_SIZE_BYTES: AtomicU64 = AtomicU64::new(0);
 /// Maximum size of the log file before it will be rotated, in bytes.
 const SINK_FILE_SIZE_BYTES_MAX: u64 = 1024 * 1024; // 1 MB
+/// Whether line numbers are enabled.
+static ENABLED_LINE_NUMBERS: AtomicBool = AtomicBool::new(false);
 
 pub struct Record<'a> {
     pub scope: Scope,
     pub level: log::Level,
     pub message: &'a std::fmt::Arguments<'a>,
     pub module_path: Option<&'a str>,
+    pub line: Option<u32>,
 }
 
 pub fn init_output_stdout() {
@@ -49,6 +52,10 @@ pub fn init_output_stdout() {
 
 pub fn init_output_stderr() {
     ENABLED_SINKS_STDERR.store(true, Ordering::Release);
+}
+
+pub fn enable_line_numbers() {
+    ENABLED_LINE_NUMBERS.store(true, Ordering::Release);
 }
 
 pub fn init_output_file(
@@ -105,7 +112,10 @@ static LEVEL_ANSI_COLORS: [&str; 6] = [
 ];
 
 // PERF: batching
-pub fn submit(record: Record) {
+pub fn submit(mut record: Record) {
+    if ENABLED_LINE_NUMBERS.load(Ordering::Acquire) {
+        record.line.take();
+    }
     if ENABLED_SINKS_STDOUT.load(Ordering::Acquire) {
         let mut stdout = std::io::stdout().lock();
         _ = writeln!(
@@ -117,6 +127,7 @@ pub fn submit(record: Record) {
             SourceFmt {
                 scope: record.scope,
                 module_path: record.module_path,
+                line: record.line,
                 ansi: true,
             },
             record.message
@@ -132,6 +143,7 @@ pub fn submit(record: Record) {
             SourceFmt {
                 scope: record.scope,
                 module_path: record.module_path,
+                line: record.line,
                 ansi: true,
             },
             record.message
@@ -167,6 +179,7 @@ pub fn submit(record: Record) {
                 SourceFmt {
                     scope: record.scope,
                     module_path: record.module_path,
+                    line: record.line,
                     ansi: false,
                 },
                 record.message
@@ -202,6 +215,7 @@ pub fn flush() {
 struct SourceFmt<'a> {
     scope: Scope,
     module_path: Option<&'a str>,
+    line: Option<u32>,
     ansi: bool,
 }
 
@@ -224,6 +238,10 @@ impl std::fmt::Display for SourceFmt<'_> {
                 f.write_char(SCOPE_STRING_SEP_CHAR)?;
                 f.write_str(subscope)?;
             }
+        }
+        if let Some(line) = self.line {
+            f.write_char(':')?;
+            line.fmt(f)?;
         }
         if self.ansi {
             f.write_str(ANSI_RESET)?;

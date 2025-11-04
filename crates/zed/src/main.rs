@@ -242,6 +242,9 @@ pub fn main() {
             zlog::init_output_stdout();
         };
     }
+    if std::env::var_os("ZED_LOG_LINE_NUMBERS").is_some() {
+        zlog::enable_line_numbers();
+    }
 
     let app_version = AppVersion::load(env!("CARGO_PKG_VERSION"));
     let app_commit_sha =
