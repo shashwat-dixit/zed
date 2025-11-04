@@ -135,6 +135,7 @@ waker-fn = "1.2.0"
 lyon = "1.0"
 libc.workspace = true
 pin-project = "1.1.10"
+circular-buffer.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block = "0.1"
@@ -155,6 +156,7 @@ objc2 = { version = "0.6", optional = true }
 objc2-metal = { version = "0.3", optional = true }
 #TODO: replace with "objc2"
 metal.workspace = true
+flume = "0.11"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos"))'.dependencies]
 pathfinder_geometry = "0.5"

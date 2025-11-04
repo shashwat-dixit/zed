@@ -2,7 +2,8 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use crate::{PlatformDispatcher, TaskLabel};
+use crate::{PlatformDispatcher, RunnableMeta, TaskLabel, TaskTiming};
+
 use async_task::Runnable;
 use objc::{
     class, msg_send,
@@ -10,9 +11,10 @@ use objc::{
     sel, sel_impl,
 };
 use std::{
+    cell::RefCell,
     ffi::c_void,
     ptr::{NonNull, addr_of},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// All items in the generated file are marked as pub, so we're gonna wrap it in a separate mod to prevent
@@ -28,13 +30,21 @@ pub(crate) fn dispatch_get_main_queue() -> dispatch_queue_t {
 
 pub(crate) struct MacDispatcher;
 
+thread_local! {
+    static THREAD_TIMINGS: RefCell<crate::platform::TaskTimings> = RefCell::new(crate::platform::TaskTimings::new());
+}
+
 impl PlatformDispatcher for MacDispatcher {
+    // fn with_current_thread_timings(&self, cb: dyn FnOnce(&crate::platform::TaskTimings)) {
+    //     THREAD_TIMINGS.with_borrow(|timings| cb(timings));
+    // }
+
     fn is_main_thread(&self) -> bool {
         let is_main_thread: BOOL = unsafe { msg_send![class!(NSThread), isMainThread] };
         is_main_thread == YES
     }
 
-    fn dispatch(&self, runnable: Runnable, _: Option<TaskLabel>) {
+    fn dispatch(&self, runnable: Runnable<RunnableMeta>, _: Option<TaskLabel>) {
         unsafe {
             dispatch_async_f(
                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH.try_into().unwrap(), 0),
@@ -44,7 +54,7 @@ impl PlatformDispatcher for MacDispatcher {
         }
     }
 
-    fn dispatch_on_main_thread(&self, runnable: Runnable) {
+    fn dispatch_on_main_thread(&self, runnable: Runnable<RunnableMeta>) {
         unsafe {
             dispatch_async_f(
                 dispatch_get_main_queue(),
@@ -54,7 +64,7 @@ impl PlatformDispatcher for MacDispatcher {
         }
     }
 
-    fn dispatch_after(&self, duration: Duration, runnable: Runnable) {
+    fn dispatch_after(&self, duration: Duration, runnable: Runnable<RunnableMeta>) {
         unsafe {
             let queue =
                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH.try_into().unwrap(), 0);
@@ -67,9 +77,69 @@ impl PlatformDispatcher for MacDispatcher {
             );
         }
     }
+
+    fn dispatch_compat(&self, runnable: Runnable) {
+        unsafe {
+            dispatch_async_f(
+                dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH.try_into().unwrap(), 0),
+                runnable.into_raw().as_ptr() as *mut c_void,
+                Some(trampoline_compat),
+            );
+        }
+    }
+
+    fn dispatch_after_compat(&self, duration: Duration, runnable: Runnable) {
+        unsafe {
+            let queue =
+                dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH.try_into().unwrap(), 0);
+            let when = dispatch_time(DISPATCH_TIME_NOW as u64, duration.as_nanos() as i64);
+            dispatch_after_f(
+                when,
+                queue,
+                runnable.into_raw().as_ptr() as *mut c_void,
+                Some(trampoline_compat),
+            );
+        }
+    }
 }
 
 extern "C" fn trampoline(runnable: *mut c_void) {
-    let task = unsafe { Runnable::<()>::from_raw(NonNull::new_unchecked(runnable as *mut ())) };
+    let task =
+        unsafe { Runnable::<RunnableMeta>::from_raw(NonNull::new_unchecked(runnable as *mut ())) };
+
+    let location = task.metadata().location;
+
+    let start = Instant::now();
     task.run();
+    let end = Instant::now();
+
+    let timing = TaskTiming {
+        location,
+        start,
+        end,
+    };
+
+    THREAD_TIMINGS.with_borrow_mut(|timings| {
+        timings.push_back(timing);
+    });
+}
+
+extern "C" fn trampoline_compat(runnable: *mut c_void) {
+    let task = unsafe { Runnable::<()>::from_raw(NonNull::new_unchecked(runnable as *mut ())) };
+
+    let location = core::panic::Location::caller();
+
+    let start = Instant::now();
+    task.run();
+    let end = Instant::now();
+
+    let timing = TaskTiming {
+        location,
+        start,
+        end,
+    };
+
+    THREAD_TIMINGS.with_borrow_mut(|timings| {
+        timings.push_back(timing);
+    });
 }

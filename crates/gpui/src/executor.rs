@@ -1,4 +1,4 @@
-use crate::{App, Bigus, PlatformDispatcher};
+use crate::{App, PlatformDispatcher, RunnableMeta};
 use async_task::Runnable;
 use futures::channel::mpsc;
 use smol::prelude::*;
@@ -63,7 +63,7 @@ enum TaskState<T> {
     Ready(Option<T>),
 
     /// A task that is currently running.
-    Spawned(async_task::Task<T, Bigus>),
+    Spawned(async_task::Task<T, RunnableMeta>),
 }
 
 impl<T> Task<T> {
@@ -170,7 +170,7 @@ impl BackgroundExecutor {
         let dispatcher = self.dispatcher.clone();
         let location = core::panic::Location::caller();
         let (runnable, task) = async_task::Builder::new()
-            .metadata(Bigus { location })
+            .metadata(RunnableMeta { location })
             .spawn(
                 move |_| future,
                 move |runnable| dispatcher.dispatch(runnable, label),
@@ -365,7 +365,7 @@ impl BackgroundExecutor {
         }
         let location = core::panic::Location::caller();
         let (runnable, task) = async_task::Builder::new()
-            .metadata(Bigus { location })
+            .metadata(RunnableMeta { location })
             .spawn(move |_| async move {}, {
                 let dispatcher = self.dispatcher.clone();
                 move |runnable| dispatcher.dispatch_after(duration, runnable)
@@ -493,7 +493,7 @@ impl ForegroundExecutor {
             let (runnable, task) = spawn_local_with_source_location(
                 future,
                 move |runnable| dispatcher.dispatch_on_main_thread(runnable),
-                Bigus { location },
+                RunnableMeta { location },
             );
             runnable.schedule();
             Task(TaskState::Spawned(task))

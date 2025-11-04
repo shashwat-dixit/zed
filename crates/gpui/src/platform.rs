@@ -45,6 +45,7 @@ use crate::{
 };
 use anyhow::Result;
 use async_task::Runnable;
+use collections::HashMap;
 use futures::channel::oneshot;
 use image::codecs::gif::GifDecoder;
 use image::{AnimationDecoder as _, Frame};
@@ -57,6 +58,7 @@ use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
 use std::io::Cursor;
 use std::ops;
+use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
 use std::{
     fmt::{self, Debug},
@@ -556,21 +558,40 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     }
 }
 
-/// Bungus
+/// This type is public so that our test macro can generate and use it, but it should not
+/// be considered part of our public API.
+#[doc(hidden)]
 #[derive(Debug)]
-pub struct Bigus {
-    /// Bungys 2
+pub struct RunnableMeta {
+    /// Location of the runnable
     pub location: &'static core::panic::Location<'static>,
 }
+
+#[doc(hidden)]
+pub struct TaskTiming {
+    location: &'static core::panic::Location<'static>,
+    start: Instant,
+    end: Instant,
+}
+
+// Allow 20mb of task timing entries
+const MAX_TASK_TIMINGS: usize = core::mem::size_of::<TaskTiming>() / (20 * 1024 * 1024);
+
+type TaskTimings = circular_buffer::CircularBuffer<MAX_TASK_TIMINGS, TaskTiming>;
 
 /// This type is public so that our test macro can generate and use it, but it should not
 /// be considered part of our public API.
 #[doc(hidden)]
 pub trait PlatformDispatcher: Send + Sync {
+    // fn with_current_thread_timings(&self, cb: dyn FnOnce(&TaskTimings) + Sized);
     fn is_main_thread(&self) -> bool;
-    fn dispatch(&self, runnable: Runnable<Bigus>, label: Option<TaskLabel>);
-    fn dispatch_on_main_thread(&self, runnable: Runnable<Bigus>);
-    fn dispatch_after(&self, duration: Duration, runnable: Runnable<Bigus>);
+    fn dispatch(&self, runnable: Runnable<RunnableMeta>, label: Option<TaskLabel>);
+    fn dispatch_on_main_thread(&self, runnable: Runnable<RunnableMeta>);
+    fn dispatch_after(&self, duration: Duration, runnable: Runnable<RunnableMeta>);
+
+    fn dispatch_compat(&self, runnable: Runnable);
+    fn dispatch_after_compat(&self, duration: Duration, runnable: Runnable);
+
     fn now(&self) -> Instant {
         Instant::now()
     }
